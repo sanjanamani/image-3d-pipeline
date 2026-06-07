@@ -1,0 +1,54 @@
+# -----------------------------------------------------------------------
+# Image-to-3D pipeline dependencies
+# -----------------------------------------------------------------------
+# NOTE: Install PyTorch with CUDA support FIRST (before this file) via:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# The versions below are intentionally unpinned so pip can satisfy the
+# CUDA-enabled torch already installed. Pin them if you need reproducibility.
+# -----------------------------------------------------------------------
+
+# Core deep-learning runtime (CPU fallback; CUDA wheel installed by setup.sh)
+torch
+torchvision
+torchaudio
+
+# Background removal
+rembg[gpu]
+
+# Web UI
+gradio>=4.0
+
+# Image handling
+Pillow>=10.0
+
+# Numerical computing
+numpy>=1.24
+
+# 3D mesh I/O and manipulation
+trimesh>=4.0
+
+# Optional — speeds up attention layers, reduces VRAM usage.
+# Comment out if installation fails (requires a matching CUDA toolkit).
+xformers
+
+# UV atlas baking
+xatlas
+
+# -----------------------------------------------------------------------
+# Multi-object scene pipeline (Plan 2) dependencies
+# -----------------------------------------------------------------------
+
+# Panoptic segmentation (OneFormer) + Depth-Anything-V2
+transformers>=4.40
+huggingface_hub
+
+# Novel-view synthesis (Zero123++)
+diffusers>=0.27
+accelerate>=0.28
+
+# -----------------------------------------------------------------------
+# Trellis is NOT listed here — it is installed directly from its git repo
+# by setup.sh:
+#   git clone https://github.com/microsoft/TRELLIS.git
+#   pip install -e ./TRELLIS
+# -----------------------------------------------------------------------
