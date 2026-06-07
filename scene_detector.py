@@ -1,10 +1,14 @@
-"""Panoptic scene detection using OneFormer + SAM2 refinement."""
+"""Panoptic scene detection using OneFormer + DETR + SAM2 refinement.
+
+OneFormer handles background stuff (grass, trees, water, sky).
+DETR handles foreground things (dog, person, cat, etc.) using COCO classes.
+SAM2 refines all masks to pixel-perfect edges.
+"""
 
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -15,6 +19,8 @@ from PIL import Image
 # ---------------------------------------------------------------------------
 _oneformer_processor = None
 _oneformer_model = None
+_detr_processor = None
+_detr_model = None
 _sam2_predictor = None
 
 
@@ -42,6 +48,25 @@ def _get_oneformer():
     _oneformer_model.eval()
     print("[scene_detector] OneFormer loaded.")
     return _oneformer_processor, _oneformer_model
+
+
+def _get_detr():
+    """Lazy-load DETR for COCO object detection (catches dogs, people, etc.)."""
+    global _detr_processor, _detr_model
+    if _detr_processor is not None:
+        return _detr_processor, _detr_model
+
+    from transformers import DetrImageProcessor, DetrForObjectDetection
+    import torch
+
+    print("[scene_detector] Loading DETR (facebook/detr-resnet-50) for object detection …")
+    _detr_processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
+    _detr_model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _detr_model = _detr_model.to(device)
+    _detr_model.eval()
+    print("[scene_detector] DETR loaded.")
+    return _detr_processor, _detr_model
 
 
 def _get_sam2():
@@ -216,5 +241,101 @@ def detect_segments(image_path: str, min_area_ratio: float = 0.01) -> list[Detec
         results.append(seg)
         print(f"[scene_detector]  segment: {label_name!r}  thing={is_thing}  area={area_ratio:.2%}")
 
+    # -----------------------------------------------------------------------
+    # Secondary pass: DETR for foreground objects OneFormer may have missed
+    # (dogs, cats, people, etc. — COCO 80-class detector)
+    # -----------------------------------------------------------------------
+    detr_segments = _detect_things_detr(image, image_np, total_pixels,
+                                        existing_labels=[s.label for s in results])
+    results.extend(detr_segments)
+
     print(f"[scene_detector] Found {len(results)} segments (after area filter).")
     return results
+
+
+def _detect_things_detr(
+    image: Image.Image,
+    image_np: np.ndarray,
+    total_pixels: int,
+    existing_labels: list[str],
+    threshold: float = 0.7,
+    min_area_ratio: float = 0.005,
+) -> list[DetectedSegment]:
+    """Run DETR to catch foreground objects that OneFormer missed."""
+    try:
+        import torch
+        detr_proc, detr_model = _get_detr()
+    except Exception as exc:
+        print(f"[scene_detector] DETR unavailable ({exc}); skipping thing detection.")
+        return []
+
+    try:
+        import torch
+        inputs = detr_proc(images=image, return_tensors="pt")
+        inputs = {k: v.to(next(detr_model.parameters()).device) for k, v in inputs.items()}
+        with torch.no_grad():
+            outputs = detr_model(**inputs)
+
+        target_sizes = torch.tensor([[image_np.shape[0], image_np.shape[1]]])
+        results_detr = detr_proc.post_process_object_detection(
+            outputs, threshold=threshold, target_sizes=target_sizes
+        )[0]
+    except Exception as exc:
+        print(f"[scene_detector] DETR inference failed: {exc}")
+        return []
+
+    segments: list[DetectedSegment] = []
+    label_counts: dict[str, int] = {}
+
+    for score, label_id, box in zip(
+        results_detr["scores"], results_detr["labels"], results_detr["boxes"]
+    ):
+        label_name = detr_model.config.id2label[int(label_id)].lower().replace(" ", "_")
+
+        # Skip if already detected by OneFormer
+        if label_name in existing_labels:
+            continue
+
+        # Skip non-thing background classes
+        skip_classes = {"sky", "floor", "ground", "grass", "water", "wall",
+                        "ceiling", "tree", "plant", "field"}
+        if label_name in skip_classes:
+            continue
+
+        box_np = box.cpu().numpy().astype(int)
+        x0, y0, x1, y1 = box_np
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(image_np.shape[1] - 1, x1), min(image_np.shape[0] - 1, y1)
+
+        if x1 <= x0 or y1 <= y0:
+            continue
+
+        # Use SAM2 to get a precise mask from the bounding box
+        coarse_mask = np.zeros((image_np.shape[0], image_np.shape[1]), dtype=bool)
+        coarse_mask[y0:y1, x0:x1] = True
+        refined_mask = _refine_with_sam2(image_np, coarse_mask)
+
+        area_ratio = refined_mask.sum() / total_pixels
+        if area_ratio < min_area_ratio:
+            continue
+
+        count = label_counts.get(label_name, 0)
+        label_counts[label_name] = count + 1
+
+        masked_image = _make_masked_image(image, refined_mask)
+        bbox = _mask_to_bbox(refined_mask)
+
+        seg = DetectedSegment(
+            label=label_name,
+            mask=refined_mask,
+            bbox=bbox,
+            is_thing=True,
+            masked_image=masked_image,
+            segment_id=-(len(segments) + 1),
+            area_ratio=area_ratio,
+        )
+        segments.append(seg)
+        print(f"[scene_detector]  DETR segment: {label_name!r}  "
+              f"score={float(score):.2f}  area={area_ratio:.2%}")
+
+    return segments

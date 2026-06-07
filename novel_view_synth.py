@@ -47,6 +47,7 @@ def _get_zero123_pipeline():
             "sudo-ai/zero123plus-v1.1",
             custom_pipeline="sudo-ai/zero123plus-pipeline",
             torch_dtype=torch.float16,
+            trust_remote_code=True,
         )
         _zero123_pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(
             _zero123_pipe.scheduler.config,

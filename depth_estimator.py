@@ -28,17 +28,21 @@ def _get_pipeline():
     print("[depth_estimator] Loading Depth-Anything-V2-Metric-Outdoor-Large …")
     try:
         import torch
-        device = 0 if torch.cuda.is_available() else -1
-    except ImportError:
-        device = -1
+        from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
-    _depth_pipeline = hf_pipeline(
-        task="depth-estimation",
-        model="depth-anything/Depth-Anything-V2-Metric-Outdoor-Large-hf",
-        device=device,
-    )
-    print("[depth_estimator] Depth-Anything-V2 loaded.")
-    return _depth_pipeline
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        processor = AutoImageProcessor.from_pretrained(
+            "depth-anything/Depth-Anything-V2-Metric-Outdoor-Large-hf"
+        )
+        model = AutoModelForDepthEstimation.from_pretrained(
+            "depth-anything/Depth-Anything-V2-Metric-Outdoor-Large-hf"
+        ).to(device)
+        model.eval()
+        _depth_pipeline = (processor, model, device)
+        print("[depth_estimator] Depth-Anything-V2 loaded.")
+        return _depth_pipeline
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load Depth-Anything-V2: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -48,32 +52,36 @@ def _get_pipeline():
 def estimate_depth(image_path: str) -> np.ndarray:
     """Estimate metric depth for an image.
 
-    Parameters
-    ----------
-    image_path:
-        Path to the source image.
-
-    Returns
-    -------
-    np.ndarray
-        Depth map as float32 H×W array, values in metres.
+    Returns float32 H×W array in metres (real-world scale).
     """
-    pipe = _get_pipeline()
+    import torch
+
+    processor, model, device = _get_pipeline()
     image = Image.open(image_path).convert("RGB")
+    orig_w, orig_h = image.size
 
     print("[depth_estimator] Running depth estimation …")
-    result = pipe(image)
-    depth = result["depth"]
+    inputs = processor(images=image, return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
 
-    # Ensure numpy float32
-    if isinstance(depth, Image.Image):
-        depth_arr = np.array(depth, dtype=np.float32)
-    else:
-        depth_arr = np.array(depth, dtype=np.float32)
+    with torch.no_grad():
+        outputs = model(**inputs)
 
-    print(f"[depth_estimator] Depth map: shape={depth_arr.shape}, "
-          f"min={depth_arr.min():.2f}m, max={depth_arr.max():.2f}m")
-    return depth_arr
+    # predicted_depth: (1, H', W') tensor in metres
+    predicted_depth = outputs.predicted_depth  # (1, H', W')
+
+    # Resize back to original image size
+    import torch.nn.functional as F
+    depth_up = F.interpolate(
+        predicted_depth.unsqueeze(1),
+        size=(orig_h, orig_w),
+        mode="bilinear",
+        align_corners=False,
+    ).squeeze().cpu().numpy().astype(np.float32)
+
+    print(f"[depth_estimator] Depth map: shape={depth_up.shape}, "
+          f"min={depth_up.min():.2f}m, max={depth_up.max():.2f}m")
+    return depth_up
 
 
 def get_segment_depth(depth_map: np.ndarray, mask: np.ndarray) -> float:
