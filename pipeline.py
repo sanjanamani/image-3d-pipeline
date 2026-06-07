@@ -225,6 +225,12 @@ def run_pipeline(
         faces = mesh_data.faces.cpu().numpy()
         tm = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
 
+        # Keep only the largest connected component (removes floating debris)
+        components = tm.split(only_watertight=False)
+        if components:
+            tm = max(components, key=lambda m: len(m.faces))
+            print(f"[pipeline] Kept largest component: {len(tm.faces)} faces")
+
         # Cap holes before export
         if _HOLE_CAPPER_AVAILABLE and cap_holes is not None:
             print("[pipeline] Capping holes …")

@@ -43,20 +43,20 @@ def make_ground_plane(
     trimesh.Trimesh
         Flat subdivided mesh with tiled ground texture.
     """
-    # Extract masked region for texture
-    arr = np.array(image.convert("RGB"))
-    masked_arr = arr.copy()
-    masked_arr[~mask] = 0
-
+    # Sample the average color of the masked region, then build a small
+    # solid-color tile — avoids dumping the whole photo as a flat rectangle.
+    arr = np.array(image.convert("RGB"), dtype=np.float32)
     ys, xs = np.where(mask)
     if len(xs) > 0:
-        x0, x1 = int(xs.min()), int(xs.max())
-        y0, y1 = int(ys.min()), int(ys.max())
-        crop = Image.fromarray(masked_arr[y0:y1+1, x0:x1+1])
+        avg = arr[ys, xs].mean(axis=0).astype(np.uint8)
+        # Add slight brightness variation to make it look less flat
+        tile_size = 128
+        tile = np.full((tile_size, tile_size, 3), avg, dtype=np.uint8)
+        # Add a subtle noise pattern
+        noise = np.random.randint(-15, 15, tile.shape, dtype=np.int16)
+        tile = np.clip(tile.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+        crop = Image.fromarray(tile)
     else:
-        crop = Image.fromarray(masked_arr)
-
-    if crop.size[0] == 0 or crop.size[1] == 0:
         crop = Image.new("RGB", (64, 64), (100, 120, 80))
 
     # Build subdivided XZ grid (Y-up coordinate system)

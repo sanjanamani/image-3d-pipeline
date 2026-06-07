@@ -133,7 +133,16 @@ def project_texture(
     else:
         avg_color = np.array([128.0, 128.0, 128.0])
 
-    src_rgb = src_arr[:, :, :3]  # (H, W, 3)
+    # Build a "clean" RGB where transparent pixels are filled with the nearest
+    # foreground pixel color — prevents background bleed onto object edges.
+    src_rgb = src_arr[:, :, :3].copy()  # (H, W, 3)
+    if not alpha_mask.all():
+        from scipy.ndimage import distance_transform_edt
+        # For each background pixel, find the nearest foreground pixel
+        bg_mask = ~alpha_mask
+        if bg_mask.any() and alpha_mask.any():
+            _, nearest_idx = distance_transform_edt(bg_mask, return_indices=True)
+            src_rgb[bg_mask] = src_rgb[nearest_idx[0][bg_mask], nearest_idx[1][bg_mask]]
 
     # ------------------------------------------------------------------
     # 4. Compute per-face normals and front-facing mask
