@@ -50,9 +50,12 @@ Write-Host "Creating virtual environment .venv ..."
 & ".venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
 
-# --- 3. PyTorch with CUDA 12.1 (RTX 4060 = Ada / CUDA 12.x) --------------
-Write-Host "Installing PyTorch (CUDA 12.1) ..." -ForegroundColor Cyan
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# --- 3. PyTorch with CUDA 12.4 (RTX 4060 = Ada / CUDA 12.x) --------------
+# Use cu124, which ships torch >= 2.6.  transformers refuses to load .bin
+# checkpoints (e.g. OneFormer) on torch < 2.6 (CVE-2025-32434), and the
+# cu121 index tops out at torch 2.5, so cu124 is required here.
+Write-Host "Installing PyTorch (CUDA 12.4, torch >= 2.6) ..." -ForegroundColor Cyan
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
 # --- 4. Preview dependencies --------------------------------------------
 Write-Host "Installing preview dependencies ..." -ForegroundColor Cyan
