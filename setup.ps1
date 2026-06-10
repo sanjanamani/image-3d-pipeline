@@ -1,9 +1,10 @@
 # =======================================================================
 # Stage-A setup for native Windows + NVIDIA GPU (PowerShell).
 #
-# Installs PyTorch (CUDA 12.1) + the layout-preview dependencies.
-# Does NOT install Trellis (its custom CUDA ops don't build on native
-# Windows — use WSL2 or Colab for the full Trellis pipeline, Stage B).
+# Installs PyTorch (CUDA 12.1) + the layout-preview dependencies into a
+# Python 3.10/3.11/3.12 virtual environment.  Does NOT install Trellis
+# (its custom CUDA ops don't build on native Windows — use WSL2 or Colab
+# for the full Trellis pipeline, Stage B).
 #
 # Usage (from the repo folder, in PowerShell):
 #   .\setup.ps1
@@ -15,16 +16,37 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "== Image-to-3D : Stage-A (preview) setup ==" -ForegroundColor Cyan
 
-# --- 1. Check Python -----------------------------------------------------
-$py = Get-Command python -ErrorAction SilentlyContinue
-if (-not $py) { throw "Python not found on PATH. Install Python 3.10/3.11 first." }
-Write-Host "Python: $((python --version) 2>&1)"
-
-# --- 2. Virtual environment ---------------------------------------------
-if (-not (Test-Path ".venv")) {
-    Write-Host "Creating virtual environment .venv ..."
-    python -m venv .venv
+# --- 1. Find a SUPPORTED Python (3.10-3.12; NOT 3.13/3.14) ---------------
+# PyTorch + prebuilt wheels do not yet cover Python 3.13/3.14, which causes
+# pip to try compiling from source and fail.  We require 3.10-3.12.
+$pyArgs = $null
+foreach ($v in @("3.12", "3.11", "3.10")) {
+    try {
+        & py "-$v" -c "import sys" 2>$null
+        if ($LASTEXITCODE -eq 0) { $pyArgs = @("-$v"); break }
+    } catch { }
 }
+
+if (-not $pyArgs) {
+    Write-Host ""
+    Write-Host "ERROR: No supported Python (3.10-3.12) found." -ForegroundColor Red
+    Write-Host "Your default Python is too new for PyTorch wheels (you have:" -ForegroundColor Red
+    (python --version) 2>&1 | Write-Host -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Install Python 3.12, then re-run this script:" -ForegroundColor Yellow
+    Write-Host "  winget install -e --id Python.Python.3.12" -ForegroundColor Yellow
+    Write-Host "  # close & reopen PowerShell, then:  .\setup.ps1"
+    throw "Supported Python not found."
+}
+Write-Host "Using Python: $((& py $pyArgs --version) 2>&1)"
+
+# --- 2. (Re)create the virtual environment ------------------------------
+if (Test-Path ".venv") {
+    Write-Host "Removing existing .venv (may have been built with a wrong Python) ..."
+    Remove-Item -Recurse -Force ".venv"
+}
+Write-Host "Creating virtual environment .venv ..."
+& py $pyArgs -m venv .venv
 & ".venv\Scripts\Activate.ps1"
 python -m pip install --upgrade pip
 

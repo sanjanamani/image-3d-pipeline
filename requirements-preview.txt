@@ -1,10 +1,13 @@
 # -----------------------------------------------------------------------
 # Stage-A "layout preview" dependencies (NO Trellis, NO compiled CUDA ops).
 # Works on native Windows + an NVIDIA GPU. Install torch FIRST via setup.ps1.
+#
+# Intentionally lean: the billboard preview does not need xatlas/rembg/gradio,
+# so we avoid packages that would try to compile from source.
 # -----------------------------------------------------------------------
 
 # Detection (OneFormer + DETR) and depth (Depth-Anything-V2)
-transformers>=4.40
+transformers>=4.44,<5
 huggingface_hub
 accelerate>=0.28
 
@@ -13,10 +16,3 @@ numpy>=1.24
 scipy>=1.10
 Pillow>=10.0
 trimesh>=4.0
-xatlas
-
-# Background removal fallback (optional)
-rembg
-
-# Web UI (optional — CLI works without it)
-gradio>=4.0
