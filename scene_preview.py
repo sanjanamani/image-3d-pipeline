@@ -98,18 +98,14 @@ def _floor_world(
 # Composition (pure geometry — unit-testable without ML models)
 # ---------------------------------------------------------------------------
 
-def compose_preview_scene(segments, depth_map: np.ndarray, image: Image.Image):
-    """Compose a billboard layout scene from detected segments + depth.
+def fit_ground_from_segments(segments, depth_map, camera, image):
+    """Fit the scene ground plane from ground/water segments.
 
-    ``segments`` is any iterable of objects exposing ``.label``, ``.mask``
-    (bool H×W), ``.bbox`` (x0,y0,x1,y1), ``.is_thing``, ``.area_ratio`` and
-    ``.masked_image`` (PIL RGBA) — i.e. ``scene_detector.DetectedSegment``.
+    Returns ``(GroundPlane, floor_color)``.  Shared by the Stage-A preview and
+    the Stage-B build so both seat objects on the same surface.
     """
     img_w, img_h = image.size
-    camera = PinholeCamera(img_w, img_h, vfov_deg=estimate_vfov(img_w, img_h))
     arr = np.asarray(image.convert("RGB"))
-
-    # --- Fit the ground from ground/water segments (fallback if none) -------
     world_grid = camera.unproject_depth_map(depth_map)
     ground_mask = np.zeros((img_h, img_w), dtype=bool)
     floor_color = (120, 120, 120)
@@ -124,6 +120,21 @@ def compose_preview_scene(segments, depth_map: np.ndarray, image: Image.Image):
             or fallback_ground_plane(world_grid.reshape(-1, 3))
     else:
         ground = fallback_ground_plane(world_grid.reshape(-1, 3))
+    return ground, floor_color
+
+
+def compose_preview_scene(segments, depth_map: np.ndarray, image: Image.Image):
+    """Compose a billboard layout scene from detected segments + depth.
+
+    ``segments`` is any iterable of objects exposing ``.label``, ``.mask``
+    (bool H×W), ``.bbox`` (x0,y0,x1,y1), ``.is_thing``, ``.area_ratio`` and
+    ``.masked_image`` (PIL RGBA) — i.e. ``scene_detector.DetectedSegment``.
+    """
+    img_w, img_h = image.size
+    camera = PinholeCamera(img_w, img_h, vfov_deg=estimate_vfov(img_w, img_h))
+
+    # --- Fit the ground from ground/water segments (fallback if none) -------
+    ground, floor_color = fit_ground_from_segments(segments, depth_map, camera, image)
 
     # --- Place every non-floor/sky segment as a billboard -------------------
     placed = []
