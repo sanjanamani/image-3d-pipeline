@@ -1,0 +1,22 @@
+# -----------------------------------------------------------------------
+# Stage-A "layout preview" dependencies (NO Trellis, NO compiled CUDA ops).
+# Works on native Windows + an NVIDIA GPU. Install torch FIRST via setup.ps1.
+# -----------------------------------------------------------------------
+
+# Detection (OneFormer + DETR) and depth (Depth-Anything-V2)
+transformers>=4.40
+huggingface_hub
+accelerate>=0.28
+
+# Geometry / IO
+numpy>=1.24
+scipy>=1.10
+Pillow>=10.0
+trimesh>=4.0
+xatlas
+
+# Background removal fallback (optional)
+rembg
+
+# Web UI (optional — CLI works without it)
+gradio>=4.0
