@@ -86,13 +86,17 @@ def main() -> int:
     reloaded = trimesh.load(str(path))
     assert len(reloaded.geometry) == 3, "reloaded node count wrong"
 
-    # Billboards must stand on the floor (lowest vertex ≈ FLOOR_Y).
+    # After normalization the floor sits at y=0; billboards must stand on it.
+    floor_T, floor_g = scene.graph["room_shell"]
+    floor_mesh = scene.geometry[floor_g].copy(); floor_mesh.apply_transform(floor_T)
+    floor_y = float(floor_mesh.bounds[0, 1])
+    print(f"[test] floor y={floor_y:.3f}")
     for node in billboards:
         T, gname = scene.graph[node]
         m = scene.geometry[gname].copy(); m.apply_transform(T)
         base_y = float(m.bounds[0, 1])
         print(f"[test] {node}: base_y={base_y:.3f}")
-        assert abs(base_y - FLOOR_Y) < 0.15, f"{node} not on floor"
+        assert abs(base_y - floor_y) < 0.15, f"{node} not on floor"
 
     print(f"[test] GLB → {path.resolve()}")
     print("[test] ALL CHECKS PASSED ✓")

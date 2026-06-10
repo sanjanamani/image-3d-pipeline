@@ -55,10 +55,21 @@ def _billboard_world(
         [bx - hw, by + real_h, bz],
     ], dtype=np.float64)
     faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
-    uvs = np.array([[0, 1], [1, 1], [1, 0], [0, 0]], dtype=np.float64)
+    # Top of the billboard (high Y, verts 2 & 3) maps to the top of the image.
+    # v0 BL, v1 BR, v2 TR, v3 TL  ->  flip V so the image isn't upside-down.
+    uvs = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float64)
 
     img = masked_image.convert("RGBA")
-    material = trimesh.visual.texture.SimpleMaterial(image=img)
+    # PBR material with alpha cutout so the background is transparent and we see
+    # the object silhouette, not a solid photo rectangle. Double-sided so the
+    # billboard is visible from behind too.
+    material = trimesh.visual.material.PBRMaterial(
+        baseColorTexture=img,
+        baseColorFactor=[255, 255, 255, 255],
+        alphaMode="MASK",
+        alphaCutoff=0.5,
+        doubleSided=True,
+    )
     visual = trimesh.visual.TextureVisuals(uv=uvs, image=img, material=material)
     return trimesh.Trimesh(vertices=vertices, faces=faces, visual=visual, process=False)
 
@@ -149,7 +160,37 @@ def compose_preview_scene(segments, depth_map: np.ndarray, image: Image.Image):
     floor = _floor_world(ground, ex, ez, floor_color)
 
     scene = build_scene(placed, room_shell=floor)
+    _normalize_scene(scene, target_width=8.0)
     return scene
+
+
+def _normalize_scene(scene: trimesh.Scene, target_width: float = 8.0) -> None:
+    """Uniformly scale + recentre the scene so it's always sanely sized.
+
+    Metric depth models can be wildly mis-calibrated (e.g. the outdoor model
+    puts a close-up subject at 10+ m), producing 50 m billboards.  We rescale
+    the whole scene to a fixed horizontal extent — this preserves relative
+    depth order and relative sizes while guaranteeing a viewable result — then
+    drop the floor to y=0 and centre it on the X/Z origin.
+    """
+    lo, hi = np.asarray(scene.bounds)
+    extent = hi - lo
+    max_horizontal = float(max(extent[0], extent[2]))
+    if max_horizontal < 1e-6:
+        return
+
+    s = target_width / max_horizontal
+    scale = np.eye(4)
+    scale[0, 0] = scale[1, 1] = scale[2, 2] = s
+    scene.apply_transform(scale)
+
+    lo, hi = np.asarray(scene.bounds)
+    center = (lo + hi) / 2.0
+    move = np.eye(4)
+    move[0, 3] = -center[0]
+    move[2, 3] = -center[2]
+    move[1, 3] = -lo[1]          # floor rests on y=0
+    scene.apply_transform(move)
 
 
 # ---------------------------------------------------------------------------
