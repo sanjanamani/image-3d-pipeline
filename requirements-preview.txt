@@ -10,6 +10,7 @@
 transformers>=4.44,<5
 huggingface_hub
 accelerate>=0.28
+timm  # required by DETR's backbone — without it, object (dog/person/...) detection is skipped
 
 # Geometry / IO
 numpy>=1.24
