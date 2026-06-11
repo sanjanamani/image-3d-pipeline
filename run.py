@@ -32,6 +32,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--simplify", type=float, default=0.95)
     parser.add_argument("--texture-size", type=int, default=1024)
+    parser.add_argument("--generator", choices=["triposr", "trellis"],
+                        default="triposr",
+                        help="Stage-B (--mode build) asset generator: triposr "
+                             "(Colab-friendly) or trellis (WSL2/local).")
     args = parser.parse_args(argv)
 
     if not Path(args.image).exists():
@@ -46,7 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.mode == "build":
         from scene_build import run_build
         out = run_build(args.image, output_dir=args.output_dir, seed=args.seed,
-                        simplify=args.simplify, texture_size=args.texture_size)
+                        simplify=args.simplify, texture_size=args.texture_size,
+                        backend=args.generator)
     elif args.mode == "scene":
         from scene_pipeline import run_scene_pipeline
         out = run_scene_pipeline(args.image, output_dir=args.output_dir,

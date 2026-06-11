@@ -77,12 +77,68 @@ def _trellis_mesh(masked_image: Image.Image, seed: int, simplify: float,
 
 
 # ---------------------------------------------------------------------------
+# TripoSR (lazy, cached) — installs cleanly on Colab/py3.12 (no spconv/kaolin)
+# ---------------------------------------------------------------------------
+_triposr_model = None
+
+
+def _get_triposr():
+    global _triposr_model
+    if _triposr_model is not None:
+        return _triposr_model
+    import torch
+    from tsr.system import TSR
+
+    print("[scene_build] Loading TripoSR (stabilityai/TripoSR) …")
+    model = TSR.from_pretrained(
+        "stabilityai/TripoSR", config_name="config.yaml", weight_name="model.ckpt"
+    )
+    model.renderer.set_chunk_size(8192)
+    if torch.cuda.is_available():
+        model.to("cuda")
+    _triposr_model = model
+    print("[scene_build] TripoSR loaded.")
+    return model
+
+
+def _triposr_mesh(masked_image: Image.Image, resolution: int = 256) -> trimesh.Trimesh | None:
+    """Generate a single textured 3D mesh from a masked object image (TripoSR)."""
+    import torch
+
+    model = _get_triposr()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # TripoSR expects the object composited over a neutral grey background.
+    rgba = np.asarray(masked_image.convert("RGBA"), dtype=np.float32) / 255.0
+    rgb, alpha = rgba[..., :3], rgba[..., 3:4]
+    comp = rgb * alpha + (1.0 - alpha) * 0.5
+    pil = Image.fromarray((comp * 255).astype(np.uint8))
+
+    with torch.no_grad():
+        scene_codes = model([pil], device=device)
+    meshes = model.extract_mesh(scene_codes, has_vertex_color=True, resolution=resolution)
+    return meshes[0] if meshes else None
+
+
+def _generate_mesh(backend: str, masked_image: Image.Image, seed: int,
+                   simplify: float, texture_size: int) -> trimesh.Trimesh | None:
+    if backend == "trellis":
+        return _trellis_mesh(masked_image, seed, simplify, texture_size)
+    return _triposr_mesh(masked_image)
+
+
+# ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
 
 def run_build(image_path: str, output_dir: str = "outputs", seed: int = 42,
-              simplify: float = 0.95, texture_size: int = 1024) -> str:
-    """Detect → depth → Trellis assets → placed scene graph → scene.glb."""
+              simplify: float = 0.95, texture_size: int = 1024,
+              backend: str = "triposr") -> str:
+    """Detect → depth → real 3D assets → placed scene graph → scene.glb.
+
+    ``backend``: ``"triposr"`` (Colab-friendly, default) or ``"trellis"``
+    (higher quality, needs spconv/kaolin → WSL2/local only).
+    """
     from scene_detector import detect_segments
     from depth_estimator import estimate_depth
 
@@ -116,11 +172,12 @@ def run_build(image_path: str, output_dir: str = "outputs", seed: int = 42,
 
         mesh = None
         if method == ReconstructionMethod.TRELLIS:
-            print(f"[scene_build]   {seg.label}: Trellis reconstruction …")
+            print(f"[scene_build]   {seg.label}: {backend} reconstruction …")
             try:
-                mesh = _trellis_mesh(seg.masked_image, seed, simplify, texture_size)
+                mesh = _generate_mesh(backend, seg.masked_image, seed,
+                                      simplify, texture_size)
             except Exception as exc:  # noqa: BLE001
-                print(f"[scene_build]   Trellis failed for {seg.label} ({exc}); "
+                print(f"[scene_build]   {backend} failed for {seg.label} ({exc}); "
                       "using billboard.")
                 traceback.print_exc()
 
