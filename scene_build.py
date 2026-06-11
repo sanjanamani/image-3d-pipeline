@@ -101,18 +101,42 @@ def _get_triposr():
     return model
 
 
-def _triposr_mesh(masked_image: Image.Image, resolution: int = 256) -> trimesh.Trimesh | None:
-    """Generate a single textured 3D mesh from a masked object image (TripoSR)."""
+def _triposr_mesh(masked_image: Image.Image, resolution: int = 256,
+                  foreground_ratio: float = 0.85) -> trimesh.Trimesh | None:
+    """Generate a textured 3D mesh from a masked object image (TripoSR).
+
+    TripoSR expects a single object, centred and filling most of the frame on a
+    neutral background.  Our masks leave the object small/off-centre in the full
+    image, so we crop to the silhouette, centre it on a square grey canvas, and
+    resize to 512 px before inference.
+    """
     import torch
 
     model = _get_triposr()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # TripoSR expects the object composited over a neutral grey background.
-    rgba = np.asarray(masked_image.convert("RGBA"), dtype=np.float32) / 255.0
-    rgb, alpha = rgba[..., :3], rgba[..., 3:4]
-    comp = rgb * alpha + (1.0 - alpha) * 0.5
-    pil = Image.fromarray((comp * 255).astype(np.uint8))
+    rgba = np.asarray(masked_image.convert("RGBA"))
+    alpha = rgba[..., 3]
+    ys, xs = np.where(alpha > 10)
+    if len(xs) == 0:
+        return None
+
+    x0, x1 = int(xs.min()), int(xs.max())
+    y0, y1 = int(ys.min()), int(ys.max())
+    crop = rgba[y0:y1 + 1, x0:x1 + 1]
+    h, w = crop.shape[:2]
+
+    # Square canvas sized so the object fills `foreground_ratio` of the frame.
+    side = int(max(h, w) / max(foreground_ratio, 0.1))
+    canvas = np.zeros((side, side, 4), dtype=np.uint8)
+    oy, ox = (side - h) // 2, (side - w) // 2
+    canvas[oy:oy + h, ox:ox + w] = crop
+
+    # Composite over neutral grey (TripoSR convention).
+    c = canvas.astype(np.float32) / 255.0
+    rgb, a = c[..., :3], c[..., 3:4]
+    comp = rgb * a + (1.0 - a) * 0.5
+    pil = Image.fromarray((comp * 255).astype(np.uint8)).resize((512, 512), Image.LANCZOS)
 
     with torch.no_grad():
         scene_codes = model([pil], device=device)
